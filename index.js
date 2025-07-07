@@ -35,12 +35,40 @@ async function run() {
             res.send(result);
         })
 
+
+
+        app.post("/users", async (req, res) => {
+            const user = await usersCollection.insertOne(req.body);
+            res.send(user);
+        });
+
         // GET APIs
         app.get('/jobsAndInterns', async (req, res) => {
             let cursor = jobsAndInternsCollection.find();
             const result = await cursor.toArray();
             res.send(result);
-        })
+        });
+
+
+        app.get("/users", async (req, res) => {
+            const email = req.query.email;
+            console.log(email);
+            if (!email) {
+                return res.status(400).json({ error: "Email query param is required" });
+            }
+            try {
+                const user = await usersCollection.findOne({ email });
+
+                if (user) {
+                    res.status(200).json({ exists: true, user });
+                } else {
+                    res.status(404).json({ exists: false, user: null });
+                }
+            } catch (error) {
+                console.error("Error fetching user:", error);
+                res.status(500).json({ error: "Internal server error" });
+            }
+        });
 
         // PUT APIs
 
