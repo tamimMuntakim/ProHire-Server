@@ -26,6 +26,7 @@ async function run() {
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
 
         const jobsAndInternsCollection = client.db("proHireDB").collection("jobsAndInterns");
+        const applicationsCollection = client.db("proHireDB").collection("applications");
         const usersCollection = client.db("proHireDB").collection("users");
 
         // POST APIs
@@ -35,7 +36,24 @@ async function run() {
             res.send(result);
         })
 
+        app.post('/applications', async (req, res) => {
+            const newApplication = req.body;
+            // Add a timestamp for when the application was received
+            newApplication.appliedAt = new Date();
+            // Set an initial status for the application
+            newApplication.status = "Pending"; // Or "Submitted", etc.
 
+            try {
+                const result = await applicationsCollection.insertOne(newApplication);
+                res.status(201).send({
+                    insertedId: result.insertedId,
+                    message: "Application submitted successfully!"
+                });
+            } catch (error) {
+                console.error("Error submitting application:", error);
+                res.status(500).send({ message: "Failed to submit application. Please try again later." });
+            }
+        });
 
         app.post("/users", async (req, res) => {
             const newUser = req.body;
@@ -143,6 +161,51 @@ async function run() {
             } catch (error) {
                 console.error("Error fetching all listings with pagination and filters:", error);
                 res.status(500).send({ message: "Failed to fetch listings" });
+            }
+        });
+
+        // -----------------
+        app.get('/myApplications', async (req, res) => {
+            const applicantUserId = req.query.applicantUserId; // Expects the user's ID
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 10;
+            const skip = (page - 1) * limit;
+
+            if (!applicantUserId) {
+                return res.status(400).send({ message: "Applicant User ID is required." });
+            }
+
+            const filter = { applicantUserId: applicantUserId }; // Start filtering by the user's ID
+
+            // Apply filters based on query parameters from the frontend
+            if (req.query.status) {
+                filter.status = req.query.status; // Filters by the exact status string (e.g., "Pending", "Accepted", "Rejected")
+            }
+            if (req.query.jobType) {
+                filter.jobType = req.query.jobType;
+            }
+            if (req.query.employmentType) {
+                filter.employmentType = req.query.employmentType;
+            }
+            // Note: No need to remove `companyName` or `jobTitle` filters here if they were never intended for this specific endpoint.
+            // The backend will only apply filters that are present in `req.query`.
+
+            try {
+                const totalApplications = await applicationsCollection.countDocuments(filter);
+                const applications = await applicationsCollection.find(filter)
+                    .skip(skip)
+                    .limit(limit)
+                    .toArray();
+
+                res.send({
+                    currentPage: page,
+                    totalPages: Math.ceil(totalApplications / limit),
+                    totalItems: totalApplications,
+                    applications: applications
+                });
+            } catch (error) {
+                console.error("Error fetching user applications:", error);
+                res.status(500).send({ message: "Failed to fetch applications." });
             }
         });
 
