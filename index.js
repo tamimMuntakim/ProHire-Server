@@ -81,6 +81,71 @@ async function run() {
             res.send(result);
         })
 
+        // app.get('/allListings', async (req, res) => {
+        //     const page = parseInt(req.query.page) || 1; // Default to page 1
+        //     const limit = parseInt(req.query.limit) || 10; // Default to 10 items per page
+
+        //     const skip = (page - 1) * limit;
+
+        //     try {
+        //         const totalListings = await jobsAndInternsCollection.countDocuments({}); // Get total count for pagination info
+        //         const listings = await jobsAndInternsCollection.find({})
+        //             .skip(skip)
+        //             .limit(limit)
+        //             .toArray();
+
+        //         res.send({
+        //             currentPage: page,
+        //             totalPages: Math.ceil(totalListings / limit),
+        //             totalItems: totalListings,
+        //             listings: listings
+        //         });
+        //     } catch (error) {
+        //         console.error("Error fetching all listings with pagination:", error);
+        //         res.status(500).send({ message: "Failed to fetch listings" });
+        //     }
+        // });
+
+        app.get('/allListings', async (req, res) => {
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 10;
+            const skip = (page - 1) * limit;
+
+            // Build filter object from query parameters
+            const filter = {};
+            if (req.query.jobType) {
+                filter.jobType = req.query.jobType;
+            }
+            if (req.query.employmentType) {
+                filter.employmentType = req.query.employmentType;
+            }
+            if (req.query.industry) {
+                filter.industry = req.query.industry;
+            }
+            if (req.query.paid) {
+                filter.paid = req.query.paid;
+            }
+
+            try {
+                // Apply filters to both count and find queries
+                const totalListings = await jobsAndInternsCollection.countDocuments(filter);
+                const listings = await jobsAndInternsCollection.find(filter)
+                    .skip(skip)
+                    .limit(limit)
+                    .toArray();
+
+                res.send({
+                    currentPage: page,
+                    totalPages: Math.ceil(totalListings / limit),
+                    totalItems: totalListings,
+                    listings: listings
+                });
+            } catch (error) {
+                console.error("Error fetching all listings with pagination and filters:", error);
+                res.status(500).send({ message: "Failed to fetch listings" });
+            }
+        });
+
         app.get("/users", async (req, res) => {
             const email = req.query?.email;
             if (!email) {
