@@ -31,14 +31,15 @@ async function run() {
         // POST APIs
         app.post('/jobsAndInterns', async (req, res) => {
             const newJobAndIntern = req.body;
-            const result = await marathonsCollection.insertOne(newJobAndIntern);
+            const result = await jobsAndInternsCollection.insertOne(newJobAndIntern);
             res.send(result);
         })
 
 
 
         app.post("/users", async (req, res) => {
-            const user = await usersCollection.insertOne(req.body);
+            const newUser = req.body;
+            const user = await usersCollection.insertOne(newUser);
             res.send(user);
         });
 
@@ -49,10 +50,39 @@ async function run() {
             res.send(result);
         });
 
+        app.get('/jobsAndInterns/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = {
+                _id: new ObjectId(id),
+            };
+            const result = await jobsAndInternsCollection.findOne(query);
+            res.send(result);
+        })
+
+        app.get('/onlyJobs', async (req, res) => {
+            let cursor = jobsAndInternsCollection.find({
+                jobType: { $in: ["Full-time", "Part-time"] }
+            });
+            if (req.query?.limit == "true") {
+                cursor = cursor.limit(6);
+            }
+            const result = await cursor.toArray();
+            res.send(result);
+        })
+
+        app.get('/onlyInterns', async (req, res) => {
+            let cursor = jobsAndInternsCollection.find({
+                jobType: "Internship"
+            });
+            if (req.query?.limit == "true") {
+                cursor = cursor.limit(6);
+            }
+            const result = await cursor.toArray();
+            res.send(result);
+        })
 
         app.get("/users", async (req, res) => {
-            const email = req.query.email;
-            console.log(email);
+            const email = req.query?.email;
             if (!email) {
                 return res.status(400).json({ error: "Email query param is required" });
             }
