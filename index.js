@@ -209,6 +209,136 @@ async function run() {
             }
         });
 
+        app.get('/myPostedJobs', async (req, res) => {
+            const employerEmail = req.query.employerEmail; // Expects the recruiter's email
+            if (!employerEmail) {
+                return res.status(400).send({ message: "Employer email is required." });
+            }
+            try {
+                // Find jobs where 'addedBy' matches the employerEmail
+                const postedJobs = await jobsAndInternsCollection.find({ addedBy: employerEmail })
+                    .project({ title: 1, companyName: 1 }) // Only return title and companyName
+                    .toArray();
+                res.send(postedJobs);
+            } catch (error) {
+                console.error("Error fetching posted jobs:", error);
+                res.status(500).send({ message: "Failed to fetch posted jobs." });
+            }
+        });
+
+        // 2. GET /applicationsByJob: To fetch applications for a specific job ID (for recruiter)
+        // app.get('/applicationsByJob', async (req, res) => {
+        //     const jobId = req.query.jobId;
+        //     const page = parseInt(req.query.page) || 1;
+        //     const limit = parseInt(req.query.limit) || 10;
+        //     const skip = (page - 1) * limit;
+
+        //     if (!jobId) {
+        //         return res.status(400).send({ message: "Job ID is required." });
+        //     }
+
+        //     const filter = { jobId: jobId }; // Filter by the specific job ID
+
+        //     // --- NEW: Status filtering logic for recruiter's view ---
+        //     // If the recruiter filters by a simplified status, map it to actual backend statuses
+        //     if (req.query.status) {
+        //         if (req.query.status === 'Pending') {
+        //             // If frontend requests 'Pending', include actual 'Pending', 'Reviewed', 'Interview'
+        //             filter.status = { $in: ['Pending', 'Reviewed', 'Interview'] };
+        //         } else {
+        //             // For 'Accepted' and 'Rejected', filter by exact status
+        //             filter.status = req.query.status;
+        //         }
+        //     }
+        //     // --- End NEW Status filtering logic ---
+
+        //     try {
+        //         const totalApplications = await applicationsCollection.countDocuments(filter);
+        //         const applications = await applicationsCollection.find(filter)
+        //             .skip(skip)
+        //             .limit(limit)
+        //             .toArray();
+
+        //         res.send({
+        //             currentPage: page,
+        //             totalPages: Math.ceil(totalApplications / limit),
+        //             totalItems: totalApplications,
+        //             applications: applications
+        //         });
+        //     } catch (error) {
+        //         console.error("Error fetching applications by job:", error);
+        //         res.status(500).send({ message: "Failed to fetch applications for this job." });
+        //     }
+        // });
+
+        app.get('/applicationsByJob', async (req, res) => {
+            const jobId = req.query.jobId; // Specific job ID (if filtering)
+            const employerEmail = req.query.employerEmail; // Employer's email (if showing all their jobs)
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 10;
+            const skip = (page - 1) * limit;
+
+            const queryFilter = {}; // Initialize the main filter for applications collection
+
+            try {
+                let targetJobIds = [];
+
+                if (jobId) {
+                    // If a specific jobId is provided, filter by that
+                    targetJobIds.push(jobId);
+                } else if (employerEmail) {
+                    // If employerEmail is provided (for "all my jobs" view),
+                    // first find all job IDs posted by this employer
+                    const postedJobs = await jobsAndInternsCollection.find(
+                        { addedBy: employerEmail },
+                        { projection: { _id: 1 } } // Only fetch the _id
+                    ).toArray();
+                    targetJobIds = postedJobs.map(job => job._id.toString()); // Convert ObjectIds to strings
+                } else {
+                    // Neither jobId nor employerEmail provided, return bad request
+                    return res.status(400).send({ message: "Job ID or Employer Email is required." });
+                }
+
+                // If no jobs found for the employer, return empty results
+                if (targetJobIds.length === 0) {
+                    return res.send({
+                        currentPage: page,
+                        totalPages: 0,
+                        totalItems: 0,
+                        applications: []
+                    });
+                }
+
+                // Set the jobId filter based on whether it's a single job or multiple
+                queryFilter.jobId = { $in: targetJobIds };
+
+                // Apply status filter if present
+                if (req.query.status) {
+                    if (req.query.status === 'Pending') {
+                        queryFilter.status = { $in: ['Pending', 'Reviewed', 'Interview'] };
+                    } else {
+                        queryFilter.status = req.query.status;
+                    }
+                }
+
+                const totalApplications = await applicationsCollection.countDocuments(queryFilter);
+                const applications = await applicationsCollection.find(queryFilter)
+                    .skip(skip)
+                    .limit(limit)
+                    .toArray();
+
+                res.send({
+                    currentPage: page,
+                    totalPages: Math.ceil(totalApplications / limit),
+                    totalItems: totalApplications,
+                    applications: applications
+                });
+            } catch (error) {
+                console.error("Error fetching applications by job/employer:", error);
+                res.status(500).send({ message: "Failed to fetch applications." });
+            }
+        });
+
         app.get("/users", async (req, res) => {
             const email = req.query?.email;
             if (!email) {
@@ -232,6 +362,34 @@ async function run() {
 
 
         // PATCH APIs
+        app.patch('/applications/:id/status', async (req, res) => {
+            const id = req.params.id;
+            const { status } = req.body; // Expects { status: "Accepted" | "Rejected" | "Pending" }
+
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).send({ message: "Invalid Application ID format." });
+            }
+            // --- CRITICAL: Validate new status against ONLY the three allowed states ---
+            if (!status || !['Pending', 'Accepted', 'Rejected'].includes(status)) {
+                return res.status(400).send({ message: "Invalid status provided. Must be 'Pending', 'Accepted', or 'Rejected'." });
+            }
+            // --- End CRITICAL Validation ---
+
+            try {
+                const result = await applicationsCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $set: { status: status } }
+                );
+
+                if (result.matchedCount === 0) {
+                    return res.status(404).send({ message: "Application not found." });
+                }
+                res.send({ message: "Application status updated successfully.", modifiedCount: result.modifiedCount });
+            } catch (error) {
+                console.error("Error updating application status:", error);
+                res.status(500).send({ message: "Failed to update application status." });
+            }
+        });
 
 
         // DELETE APIs
